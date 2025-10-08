@@ -1,124 +1,28 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Fetch API Demo — Render JSON to HTML</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    :root{--bg:#0b1220;--fg:#e9eef7;--muted:#a9b6cc;--card:#141c2b;--accent:#6ca4ff}
-    *{box-sizing:border-box}body{margin:0;font-family:system-ui,Segoe UI,Inter,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
-    header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #1f2a44}
-    h1{font-size:18px;margin:0}
-    .controls{display:flex;gap:8px}
-    input,button{border:1px solid #263148;background:#0f1728;color:var(--fg);padding:10px 12px;border-radius:10px}
-    button{cursor:pointer}
-    main{max-width:960px;margin:24px auto;padding:0 16px}
-    .grid{display:grid;grid-template-columns:1fr;gap:12px}
-    @media (min-width:720px){.grid{grid-template-columns:repeat(2,1fr)}}
-    .card{background:var(--card);border:1px solid #1f2a44;border-radius:14px;padding:14px}
-    .title{font-weight:700}
-    .muted{color:var(--muted);font-size:13px}
-    .bad{color:#ff9e9e}
-    .spinner{width:18px;height:18px;border:3px solid #2a3550;border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;display:inline-block;vertical-align:middle}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-  </style>
+<meta charset="utf-8">
+<title>Random Number Auto Reload</title>
+<style>
+body{font-family:sans-serif;background:#111;color:#eee;text-align:center;padding:50px}
+#num{font-size:48px;margin-top:20px}
+</style>
 </head>
 <body>
-  <header>
-    <h1>Fetch API Demo</h1>
-    <div class="controls">
-      <input id="search" placeholder="Filter by name/email…" />
-      <button id="reload">Reload</button>
-    </div>
-  </header>
-
-  <main>
-    <div class="toolbar">
-      <div id="status" class="muted">Ready</div>
-      <div id="loading" style="display:none"><span class="spinner"></span> <span class="muted">Loading…</span></div>
-    </div>
-    <div id="grid" class="grid"></div>
-    <p id="empty" class="muted" style="display:none">No results.</p>
-    <p id="error" class="bad" style="display:none"></p>
-  </main>
-
-  <script>
-    // You can swap this URL for any JSON API endpoint you like.
-    // Using JSONPlaceholder users to mirror the “fetch & render” pattern from the video.
-    // Docs: https://jsonplaceholder.typicode.com/
-    const API_URL = 'https://jsonplaceholder.typicode.com/users';
-
-    const grid = document.getElementById('grid');
-    const empty = document.getElementById('empty');
-    const errorEl = document.getElementById('error');
-    const loading = document.getElementById('loading');
-    const statusEl = document.getElementById('status');
-    const search = document.getElementById('search');
-    const reload = document.getElementById('reload');
-
-    let data = [];
-
-    reload.addEventListener('click', load);
-    search.addEventListener('input', render);
-
-    async function load(){
-      setError(''); setEmpty(false); setLoading(true);
-      statusEl.textContent = 'Fetching users…';
-      try{
-        const res = await fetch(API_URL, { headers: { 'Accept': 'application/json' }});
-        if(!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
-        // keep raw data for filtering
-        data = Array.isArray(json) ? json : [];
-        statusEl.textContent = `Loaded ${data.length} records`;
-        render();
-      }catch(err){
-        setError(`Failed to load: ${err.message}`);
-        grid.innerHTML = '';
-        setEmpty(false);
-        statusEl.textContent = 'Error';
-      }finally{
-        setLoading(false);
-      }
-    }
-
-    function render(){
-      const q = (search.value || '').trim().toLowerCase();
-      const items = data.filter(u => {
-        if(!q) return true;
-        return [u.name, u.email, u.username, u.company?.name].some(s =>
-          String(s || '').toLowerCase().includes(q)
-        );
-      });
-
-      grid.innerHTML = '';
-      if(items.length === 0){
-        setEmpty(true);
-        return;
-      }
-      setEmpty(false);
-
-      for(const u of items){
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.innerHTML = `
-          <div class="title">${escapeHtml(u.name)} <span class="muted">(@${escapeHtml(u.username)})</span></div>
-          <div class="muted">${escapeHtml(u.email)} · ${escapeHtml(u.phone || '')}</div>
-          <div class="muted">${escapeHtml(u.company?.name || '')}</div>
-          <div class="muted">${escapeHtml(u.address?.city || '')}</div>
-        `;
-        grid.appendChild(card);
-      }
-    }
-
-    function setLoading(is){ loading.style.display = is ? 'block' : 'none'; }
-    function setEmpty(is){ empty.style.display = is ? 'block' : 'none'; }
-    function setError(msg){ errorEl.style.display = msg ? 'block' : 'none'; errorEl.textContent = msg; }
-    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-
-    // initial load
-    load();
-  </script>
+<h2>Random Number (100–1000)</h2>
+<div id="num">Loading...</div>
+<script>
+async function load(){
+  try{
+    const res = await fetch('http://www.randomnumberapi.com/api/v1.0/random?min=100&max=1000')
+    const json = await res.json()
+    document.getElementById('num').textContent = json[0]
+  }catch(e){
+    document.getElementById('num').textContent = 'Error'
+  }
+}
+load()
+setInterval(load, 5000) // reload every 5s
+</script>
 </body>
 </html>
