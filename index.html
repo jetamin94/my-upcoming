@@ -4,25 +4,34 @@
 <meta charset="utf-8">
 <title>Random Number Auto Reload</title>
 <style>
-body{font-family:sans-serif;background:#111;color:#eee;text-align:center;padding:50px}
-#num{font-size:48px;margin-top:20px}
+  body{font-family:sans-serif;background:#111;color:#eee;text-align:center;padding:50px}
+  #num{font-size:48px;margin-top:20px}
+  small{color:#aaa}
 </style>
 </head>
 <body>
 <h2>Random Number (100–1000)</h2>
 <div id="num">Loading...</div>
+<small id="status"></small>
 <script>
+const URL = 'https://www.randomnumberapi.com/api/v1.0/random?min=100&max=1000';
+const numEl = document.getElementById('num');
+const statusEl = document.getElementById('status');
+
 async function load(){
   try{
-    const res = await fetch('http://www.randomnumberapi.com/api/v1.0/random?min=100&max=1000')
-    const json = await res.json()
-    document.getElementById('num').textContent = json[0]
+    const res = await fetch(URL, { cache: 'no-store' });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const json = await res.json();
+    numEl.textContent = json[0];
+    statusEl.textContent = 'Updated: ' + new Date().toLocaleTimeString();
   }catch(e){
-    document.getElementById('num').textContent = 'Error'
+    numEl.textContent = 'Error';
+    statusEl.textContent = e.message || 'Request failed';
   }
 }
-load()
-setInterval(load, 5000) // reload every 5s
+load();
+setInterval(load, 5000);
 </script>
 </body>
 </html>
