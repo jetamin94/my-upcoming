@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My Upcoming — Google Calendar + Tasks Dashboard</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    :root {
+      --bg: #0b1220; --fg: #e9eef7; --muted: #9fb0c3; --card: #141c2b; --accent: #6ca4ff; --red: #ff6b6b; --green: #3ddc97;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Inter,sans-serif;background:var(--bg);color:var(--fg)}
+    header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #1e2940;position:sticky;top:0;background:linear-gradient(180deg, rgba(11,18,32,.98), rgba(11,18,32,.9));backdrop-filter: blur(6px)}
+    .title{font-size:18px;font-weight:700;letter-spacing:.2px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    button{appearance:none;border:1px solid #263148;background:#152037;color:var(--fg);padding:10px 14px;border-radius:12px;cursor:pointer;font-weight:600}
+    button.primary{background:var(--accent);color:#07162b;border-color:transparent}
+    button.ghost{background:transparent}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    main{max-width:980px;margin:24px auto;padding:0 16px}
+    .filters{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+    .filters label{display:flex;gap:6px;align-items:center;font-size:14px;color:var(--muted)}
+    .grid{display:grid;grid-template-columns:1fr;gap:12px}
+    @media(min-width:720px){.grid{grid-template-columns:1fr 1fr}}
+    .card{background:var(--card);border:1px solid #1e2940;border-radius:16px;padding:14px 16px;display:flex;gap:12px;align-items:flex-start}
+    .badge{font-size:12px;font-weight:700;padding:6px 8px;border-radius:999px;border:1px solid #2f3b56;color:#cfe0ff;background:#0f1728;min-width:74px;text-align:center}
+    .badge.event{border-color:#2a4dff33}
+    .badge.task{border-color:#3ddc9733}
+    .content{flex:1}
+    .titleRow{display:flex;justify-content:space-between;gap:8px}
+    .itemTitle{font-weight:700}
+    .when{color:var(--muted);font-size:13px;margin-top:4px}
+    .listTitle{color:var(--muted);font-size:12px}
+    .empty{margin:40px 0;padding:18px;border:1px dashed #2a3550;border-radius:12px;color:var(--muted);text-align:center}
+    .err{color:#ffadad}
+    footer{color:var(--muted);font-size:12px;text-align:center;margin:30px 0}
+    .spinner{width:18px;height:18px;border:3px solid #2a3550;border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">My Upcoming — Google Calendar + Tasks</div>
+    <div class="actions">
+      <button id="connect" class="primary">Connect Google</button>
+      <button id="reload" class="ghost" disabled>Reload</button>
+      <button id="signout" class="ghost" disabled>Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="filters">
+      <label><input type="checkbox" id="showEvents" checked /> Events</label>
+      <label><input type="checkbox" id="showTasks" checked /> Tasks</label>
+      <span id="status" class="when"></span>
+    </section>
+
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" style="display:none">No upcoming items found. Try expanding your time window or adding due dates to tasks.</div>
+    <div id="error" class="empty err" style="display:none"></div>
+
+    <footer>
+      Built as a client-only page. No servers, no secrets — your data is fetched directly from Google with your consent.
+    </footer>
+  </main>
+
+  <script>
+    // === CONFIG ===
+    const CLIENT_ID = "REPLACE_ME.apps.googleusercontent.com"; // OAuth 2.0 Client ID (Web)
+    const SCOPES = [
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/tasks.readonly",
+    ].join(" ");
+    const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Bangkok"; // Use browser tz; fallback to Bangkok
+
+    // === STATE ===
+    let tokenClient = null;
+    let accessToken = null;
+    let tokenExpiryMs = 0;
+    const statusEl = document.getElementById('status');
+    const gridEl = document.getElementById('grid');
+    const emptyEl = document.getElementById('empty');
+    const errEl = document.getElementById('error');
+
+    // === UI HOOKS ===
+    const btnConnect = document.getElementById('connect');
+    const btnReload = document.getElementById('reload');
+    const btnSignout = document.getElementById('signout');
+    const showEvents = document.getElementById('showEvents');
+    const showTasks = document.getElementById('showTasks');
+
+    btnConnect.addEventListener('click', () => requestToken({ prompt: 'consent' }));
+    btnReload.addEventListener('click', () => loadAndRender());
+    btnSignout.addEventListener('click', revokeToken);
+    showEvents.addEventListener('change', render); 
+    showTasks.addEventListener('change', render);
+
+    window.onload = () => {
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        callback: (resp) => onTokenResponse(resp),
+        error_callback: (err) => showError(err?.message || 'Token error')
+      });
+
+      // Try a silent token if already granted (no prompt)
+      requestToken({ prompt: '' });
+    };
+
+    function requestToken(opts = {}) {
+      try {
+        tokenClient.requestAccessToken(opts);
+      } catch (e) {
+        showError('Failed to request access token. ' + e.message);
+      }
+    }
+
+    function onTokenResponse(resp){
+      if (!resp || !resp.access_token) { showError('No access token returned.'); return; }
+      accessToken = resp.access_token;
+      // expires_in is seconds from now
+      tokenExpiryMs = Date.now() + (resp.expires_in ? (resp.expires_in * 1000) : 3600_000);
+      scheduleRefresh();
+
+      btnReload.disabled = false;
+      btnSignout.disabled = false;
+      btnConnect.disabled = true;
+      statusEl.textContent = 'Connected · tz ' + TIMEZONE;
+      hideError();
+      loadAndRender();
+    }
+
+    function scheduleRefresh(){
+      const ms = Math.max(10_000, tokenExpiryMs - Date.now() - 60_000); // refresh 60s before expiry
+      setTimeout(() => requestToken({ prompt: '' }), ms);
+    }
+
+    async function loadAndRender(){
+      setStatus('Loading…');
+      gridEl.innerHTML = '<div class="spinner" aria-label="Loading"></div>';
+      try{
+        const merged = await fetchUpcoming();
+        window.__DATA = merged; // for debugging in console
+        render();
+        setStatus(`Loaded ${merged.length} items`);
+      }catch(e){
+        showError(e.message || String(e));
+      }
+    }
+
+    function setStatus(msg){ statusEl.textContent = msg; }
+    function showError(msg){ errEl.style.display = 'block'; errEl.textContent = msg; gridEl.innerHTML = ''; emptyEl.style.display = 'none'; }
+    function hideError(){ errEl.style.display = 'none'; }
+
+    async function fetchUpcoming(){
+      const nowIso = new Date().toISOString();
+
+      // Calendar events (primary)
+      const evUrl = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events');
+      evUrl.search = new URLSearchParams({
+        singleEvents: 'true', orderBy: 'startTime', timeMin: nowIso, timeZone: TIMEZONE,
+        maxResults: '50', fields: 'items(id,summary,start,end,htmlLink)'
+      }).toString();
+
+      const evJson = await fetchWithAuth(evUrl).then(r => r.json());
+      const events = (evJson.items || []).map(e => ({
+        type: 'event', title: e.summary || '(No title)', when: e.start?.dateTime || e.start?.date || null,
+        href: e.htmlLink || null
+      }));
+
+      // Task lists
+      const listsJson = await fetchWithAuth('https://tasks.googleapis.com/tasks/v1/users/@me/lists?maxResults=100').then(r => r.json());
+      const lists = listsJson.items || [];
+
+      // For each list, load upcoming (not completed)
+      const tasksArrays = await Promise.all(lists.map(async (list) => {
+        const url = new URL(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(list.id)}/tasks`);
+        url.search = new URLSearchParams({ showCompleted: 'false', dueMin: nowIso, maxResults: '100', fields: 'items(id,title,due,status,updated,links)' }).toString();
+        const tJson = await fetchWithAuth(url).then(r => r.json());
+        return (tJson.items || []).map(t => ({
+          type: 'task', title: t.title || '(No title)', when: t.due || null, listTitle: list.title || 'Tasks', href: (t.links && t.links[0]?.link) || null
+        }));
+      }));
+
+      const tasks = tasksArrays.flat();
+
+      const merged = [...events, ...tasks].sort((a,b) => {
+        if (!a.when) return 1; if (!b.when) return -1; return new Date(a.when) - new Date(b.when);
+      });
+
+      return merged;
+    }
+
+    async function fetchWithAuth(input, init={}){
+      const resp = await fetch(input, { ...init, headers: { ...(init.headers||{}), Authorization: `Bearer ${accessToken}` }});
+      if (resp.status === 401) {
+        // Try one silent refresh then retry once
+        await new Promise((res) => requestToken({ prompt: '' }) || setTimeout(res, 700));
+        const retry = await fetch(input, { ...init, headers: { ...(init.headers||{}), Authorization: `Bearer ${accessToken}` }});
+        if (!retry.ok) throw new Error(`Google API error ${retry.status}`);
+        return retry;
+      }
+      if (!resp.ok) throw new Error(`Google API error ${resp.status}`);
+      return resp;
+    }
+
+    function fmtWhen(iso){
+      if (!iso) return 'No due date';
+      const d = new Date(iso);
+      // Detect all-day (no time) by midnight UTC and date-only string
+      const isDateOnly = iso.length === 10; // YYYY-MM-DD
+      const opts = isDateOnly ? { dateStyle: 'medium' } : { dateStyle: 'medium', timeStyle: 'short' };
+      return new Intl.DateTimeFormat(undefined, opts).format(d);
+    }
+
+    function render(){
+      hideError();
+      const data = (window.__DATA || []).filter(item => {
+        if (item.type === 'event' && !showEvents.checked) return false;
+        if (item.type === 'task' && !showTasks.checked) return false;
+        return true;
+      });
+      gridEl.innerHTML = '';
+      if (!data.length) { emptyEl.style.display = 'block'; return; }
+      emptyEl.style.display = 'none';
+
+      for (const it of data){
+        const card = document.createElement('div');
+        card.className = 'card';
+        const badge = document.createElement('div');
+        badge.className = `badge ${it.type}`;
+        badge.textContent = it.type === 'event' ? 'EVENT' : 'TASK';
+        const content = document.createElement('div'); content.className='content';
+        const titleRow = document.createElement('div'); titleRow.className='titleRow';
+        const title = document.createElement('div'); title.className = 'itemTitle'; title.textContent = it.title;
+        const when = document.createElement('div'); when.className = 'when'; when.textContent = fmtWhen(it.when);
+        const right = document.createElement('div'); right.className='listTitle';
+        if (it.listTitle) right.textContent = it.listTitle;
+        titleRow.appendChild(title); titleRow.appendChild(right);
+        content.appendChild(titleRow); content.appendChild(when);
+        if (it.href) { card.addEventListener('click', () => window.open(it.href, '_blank')); card.style.cursor='pointer'; }
+        card.appendChild(badge); card.appendChild(content);
+        gridEl.appendChild(card);
+      }
+    }
+
+    function revokeToken(){
+      if (!accessToken) return;
+      google.accounts.oauth2.revoke(accessToken, () => {
+        accessToken = null; tokenExpiryMs = 0; window.__DATA = []; render();
+        statusEl.textContent = 'Signed out';
+        btnReload.disabled = true; btnSignout.disabled = true; btnConnect.disabled = false;
+      });
+    }
+  </script>
+</body>
+</html>
